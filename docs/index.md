@@ -268,6 +268,8 @@ From the moment I declare my `ktask_t` on, I make extensive use of userland dere
 
 In principle all of this should work on 32-bit as well, but things might be different due to different pointer size. In particular the thing with the three possible page offsets might either be less or more complicated, depending on how many pages are chunked into the `ipc.ports` zone on 32-bit, and resulting from that which fields overlay in a port struct.
 
+I lack a 32-bit device that can go higher than 9.3.5 though, so... I can offer my knowledge to devs wanting to take a stab at it, but I won't personally do it.
+
 ### ETA wen?
 
 I don't know. I suppose this is a good time to start writing my own patchfinder (I want a _maintainable_ one), so... I guess I'l actually do that. No idea what roadblocks I'll run into though, or how long that'll take. Don't expect anything soon though.
