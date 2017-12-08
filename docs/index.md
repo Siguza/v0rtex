@@ -6,7 +6,7 @@ Turning the IOSurface inside out.
 
 ## Introduction
 
-On December 5th, [windknown][windknown] posted about an IOSurface mach port UaF on the [Pangu blog][blog], which [had been fixed in iOS 11.2](https://support.apple.com/en-us/HT208334) and apparent reported by [Ian Beer][ianbeer]. Now I neither speak Chinese nor really trust Google Translate with details, but the PoC on the Pangu blog was enough to illustrate the vulnerability and get me going. :P
+On the 5th of December, [windknown][windknown] posted about an IOSurface mach port UaF on the [Pangu blog][blog], which [had been fixed in iOS 11.2](https://support.apple.com/en-us/HT208334) and apparently reported by [Ian Beer][ianbeer]. Now I neither speak Chinese nor really trust Google Translate with details, but the PoC on the Pangu blog was enough to illustrate the vulnerability and get me going. :P
 
 There are a lot of things referenced in this write-up that I have not or only partially explored. I'll likely come back to expand or correct these once I learn more, but I wanted to get this write-up out as a sort of documentation for other devs who might wanna chip in.
 
@@ -27,9 +27,9 @@ Windknown's PoC uses the same port for first and subsequent registration, but I'
 
 We then free `port` via the bug, and release the `0x1100` ports we sprayed as well. In the `ipc.ports` zone, that will hopefully lead to the page on which `port` resides to have all elements freed. Once that happens, we can use the `mach_zone_force_gc` MIG call to get the entire page out of the zone, allowing us to reallocate the port with arbitrary memory instead of just valid mach ports. (Note `mach_zone_force_gc` was disabled in iOS 11, but you should still be able to trigger a garbage collection by iterating over all zones, allocating and subsequently freeing something like 100MB in each, and measuring how long it takes to do so - garbage collection should be a significant spike.)
 
-One obstacle I faced though was that the IOSurface bug seemed to have some asynchronity or whatnot - for a short time after `IOConnectCallAsyncStructMethod` returned, the port seemed to still be valid, however after a `sleep(1)` it was not. I didn't feel like hunting down the cause of that, so I simply increased the ref count on `port` by using `mach_ports_register` on my own task, which would cause the bug to still drop one ref too many, but not free it anymore. Now after that call returns, we can `usleep(100000)` to synchronise, and then use `mach_ports_register` again to decrease the ref on `port` again, this time freeing it synchronously. And since we call `mach_ports_register` already, we also register our `IOSurfaceRootUserClient` handle there because we'll need that for later. Now we just need to call `mach_zone_force_gc` and if everything worked out, the memory that contained `port` is now available for reallocation.
+One obstacle I faced though was that the IOSurface bug seemed to have some asynchronicity or whatnot - for a short time after `IOConnectCallAsyncStructMethod` returned, the port seemed to still be valid, however after a `sleep(1)` it was not. I didn't feel like hunting down the cause of that, so I simply increased the ref count on `port` by using `mach_ports_register` on my own task, which would cause the bug to still drop one ref too many, but not free it anymore. Now after that call returns, we can `usleep(100000)` to synchronise, and then use `mach_ports_register` again to decrease the ref on `port` again, this time freeing it synchronously. And since we call `mach_ports_register` already, we also register our `IOSurfaceRootUserClient` handle there because we'll need that for later. Now we just need to call `mach_zone_force_gc` and if everything worked out, the memory that contained `port` is now available for reallocation.
 
-Now we wanna reallocate it, but how and with what contents? My favourite heap allocation primitive is `OSUnserializeXML` (or `OSUnserializeBinary` I should say) because it allows fine-grained control over allocation and contents, allows for both arbitrary data and pointers, and is used in many places. So since we're dealing with IOSurface anyway, I figured we might as well use IOSurface properties. An `IOSurfaceRootUserClient` offers external methods `9`, `10` and `11` to parse arbitrary data with `OSUnserializeXML`, store the result in the kernel, and read back or delete that result at any time. I'll leave the implementation details on this for another time, but they're effectively the same as`IOSurfaceSetValue`, `IOSurfaceCopyValue` and `IOSurfaceRemoveValue`, just faster since no CF serialisation has to happen.  
+Now we want to reallocate it, but how and with what content ? My favourite heap allocation primitive is `OSUnserializeXML` (or `OSUnserializeBinary` I should say) because it allows fine-grained control over allocation and contents, allows for both arbitrary data and pointers, and is used in many places. So since we're dealing with IOSurface anyway, I figured we might as well use IOSurface properties. An `IOSurfaceRootUserClient` offers external methods `9`, `10` and `11` to parse arbitrary data with `OSUnserializeXML`, store the result in the kernel, and read back or delete that result at any time. I'll leave the implementation details on this for another time, but they're effectively the same as`IOSurfaceSetValue`, `IOSurfaceCopyValue` and `IOSurfaceRemoveValue`, just faster since no CF serialisation has to happen.  
 Alright, so now we've got to reallocate the freed pages. In order to avoid creating holes, this is best done with allocations of exactly the page size. On A9 and later that is 16KB, but on A8 and earlier the true hardware page size is 4KB, despite only 16KB being exported to userland. So we're going for `0x1000` here. Now, `OSData` would normally seem like the best choice for binary data, but it turns out that doesn't go through `kalloc` anymore for allocations larger or equal to the page size. The next best choice to me is `OSString` which works well, so long as you take into account that a null terminator is added to the serialised data, so in order to get a `0x1000` allocation, you'll want to have just `0xfff` bytes of serialised data.
 
 ### Fake port construction
@@ -80,7 +80,7 @@ typedef struct {
 } kport_t;
 ```
 
-There is a slight problem now though: we don't know at which offset the mach ports start. When a page is allocated into a zone with elements of size `x`, the first element will start at offset `0`, the second one at `x`, then `x * 2`, etc. Depending on `x`, that might leave less or more memory at the end of a page unused. To optimise that, zones that would leave a significant amount of memory unused change their allocation size to multiple pages (most notable with e.g. the `kalloc.1280` zone - `0x1000` allocations would leave `256` bytes unused, but `0x5000` is an exact multiple of `1280` and thus wastes nothing). On 10.3.3 the size of a mach port is `0xa8` bytes, and the `ipc.ports` zone uses allocations of `0x3000` bytes. So the first port will be allocated at offset `0xa8` and the last port on the first page will start at `0xfc0` and extend onto the second page - but that means the first port on the second page will start at offset `0x1068` rather than `0x1000`, and the same thing repeats for the third page as well. The problem with that is that when we reallocate those pages, we don't know whether they used to be the first, second or third of their chunk - even using an allocation size of `0x3000` ourselves wouldn't help, since that might as well start on a second or third page and just extend beyond it, since pages are units of their own.
+There is a slight problem now though: we don't know at which offset the mach ports start. When a page is allocated into a zone with elements of size `x`, the first element will start at offset `0`, the second one at `x`, then `x * 2`, etc. Depending on `x`, that might leave more or less memory at the end of a page unused. To optimise that, zones that would leave a significant amount of memory unused change their allocation size to multiple pages (most notable with e.g. the `kalloc.1280` zone - `0x1000` allocations would leave `256` bytes unused, but `0x5000` is an exact multiple of `1280` and thus wastes nothing). On 10.3.3 the size of a mach port is `0xa8` bytes, and the `ipc.ports` zone uses allocations of `0x3000` bytes. So the first port will be allocated at offset `0xa8` and the last port on the first page will start at `0xfc0` and extend onto the second page - but that means the first port on the second page will start at offset `0x1068` rather than `0x1000`, and the same thing repeats for the third page as well. The problem with that is that when we reallocate those pages, we don't know whether they used to be the first, second or third of their chunk - even using an allocation size of `0x3000` ourselves wouldn't help, since that might as well start on a second or third page and just extend beyond it, since pages are units of their own.
 
 So what we'll have to do now is create a structure that is valid no matter with which of the three possible offsets it is accessed. These offsets are `0x0`, `0x68` and `0x28` respectively for first, second and third page. The absolute minimum for a valid port is an intact lock, so we'll start with that. Long story short, initialisation looks like this:
 
@@ -209,7 +209,7 @@ kport.ip_bits = 0x80000002; // IO_BITS_ACTIVE | IOT_PORT | IKOT_TASK
 kport.ip_kobject = (kptr_t)&ktask;
 ```
 
-One call to external methods 11 and 9 each, and our changes are live and we just need to point `ktask.d.bsd_info` at some address, and `pid_for_task` will get us 4 bytes from an offset `0x10` after it. Now we can start reading from `realport`, jumping from one pointer to the next: `realport->receiver->is_task->itk_registered[0]->ip_kobject->vtab`. That is, from `realport` we read the `struct ipc_space` it belongs to (`receiver`) and from that we get the `task_t` by which it is owned (`is_task`), which is our own task. Now remember how we passed the port to `IOSurfaceRootUserClient` to `mach_ports_register` in the beginning? Thanks to that, we can now read a pointer to that port from `itk_registered[0]`, from that a pointer to the `IOSurfaceRootUserClient` itself, and from that a pointer to its C++ vtable, which is, at long last, a value from which we can derive the kernel slide.
+One call to external methods 11 and 9 each, and our changes are live and we just need to point `ktask.d.bsd_info` at some address, and `pid_for_task` will get us 4 bytes from an offset `0x10` after it. Now we can start reading from `realport`, jumping from one pointer to the next: `realport->receiver->is_task->itk_registered[0]->ip_kobject->vtab`. That is, from `realport` we read the `struct ipc_space` it belongs to (`receiver`) and from that we get the `task_t` by which it is owned (`is_task`), which is our own task. Now remember how we passed the port to `IOSurfaceRootUserClient` to `mach_ports_register` in the beginning ? Thanks to that, we can now read a pointer to that port from `itk_registered[0]`, from that a pointer to the `IOSurfaceRootUserClient` itself, and from that a pointer to its C++ vtable, which is, at long last, a value from which we can derive the kernel slide.
 
 ### Kernel code execution
 
@@ -222,7 +222,7 @@ ret
 
 That just returns the address of the memory after the fake object's vtable pointer, so we can put an object and a function pointer right after the vtab. We can then call `iokit_user_client_trap` on `fakeport`, which will lead us to this bit in the kernel:
 
-```c++
+```cpp
 result = (target->*func)(args->p1, args->p2, args->p3, args->p4, args->p5, args->p6);
 ```
 
@@ -258,7 +258,7 @@ ipc_kobject_set(newport, remap_addr, IKOT_TASK);
 realhost.special[4] = ipc_port_make_send(newport);
 ```
 
-However, that call to `vm_map_remap` with 11 arguments is not so easily executed with an `iokit_user_client_trap` that only takes 6 arguments plus one from the kernel. Maybe a fake task with attached `zone_map`, and then call from userland?
+However, that call to `vm_map_remap` with 11 arguments is not so easily executed with an `iokit_user_client_trap` that only takes 6 arguments plus one from the kernel. Maybe a fake task with attached `zone_map`, and then call from userland ?
 
 ### SMAP
 
@@ -270,9 +270,9 @@ In principle all of this should work on 32-bit as well, but things might be diff
 
 I lack a 32-bit device that can go higher than 9.3.5 though, so... I can offer my knowledge to devs wanting to take a stab at it, but I won't personally do it.
 
-### ETA wen?
+### ETA wen ?
 
-I don't know. I suppose this is a good time to start writing my own patchfinder (I want a _maintainable_ one), so... I guess I'l actually do that. No idea what roadblocks I'll run into though, or how long that'll take. Don't expect anything soon though.
+I don't know. I suppose this is a good time to start writing my own patchfinder (I want a _maintainable_ one), so... I guess I'll actually do that. No idea what roadblocks I'll run into though or how long that'll take. Don't expect anything soon.
 
 ## Conclusion
 
