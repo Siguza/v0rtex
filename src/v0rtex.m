@@ -5,9 +5,6 @@
 // Status quo:
 // - Escapes sandbox, gets root and tfp0, should work on A7-A10 devices <=10.3.3.
 // - Can call arbitrary kernel functions with up to 7 args via KCALL().
-// - Relies heavily on userland derefs, but with mach_port_request_notification
-//   you could register fakeport on itself thus leaking the address of the
-//   entire 0x1000 block, which should give you enough scratch space. (TODO)
 // - Relies on mach_zone_force_gc which was removed in iOS 11, but the same
 //   effect should be achievable by continuously spraying through zones and
 //   measuring how long it takes - garbag collection usually takes ages. :P
