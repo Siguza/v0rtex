@@ -407,7 +407,9 @@ typedef struct {
     struct {
         kptr_t data;
         uint32_t type;
+#ifdef __LP64__
         uint32_t pad;
+#endif
     } ip_lock; // spinlock
     struct {
         struct {
@@ -438,7 +440,7 @@ typedef struct {
     kptr_t ip_pdrequest;
     kptr_t ip_requests;
     kptr_t ip_premsg;
-    uint64_t  ip_context;
+    uint64_t ip_context;
     uint32_t ip_flags;
     uint32_t ip_mscount;
     uint32_t ip_srights;
