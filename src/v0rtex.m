@@ -54,8 +54,6 @@
 #   define OFFSET_TASK_ITK_REGISTERED                   0x2e8
 #   define OFFSET_TASK_BSD_INFO                         0x360
 #   define OFFSET_PROC_UCRED                            0x100
-#   define OFFSET_UCRED_CR_UID                          0x18
-#   define OFFSET_UCRED_CR_LABEL                        0x78
 #   define OFFSET_VM_MAP_HDR                            0x10
 #   define OFFSET_IPC_SPACE_IS_TASK                     0x28
 #   define OFFSET_REALHOST_SPECIAL                      0x10
@@ -73,7 +71,6 @@
 #   define OFFSET_COPYOUT                               0xfffffff00718d21c
 #   define OFFSET_CHGPROCCNT                            0xfffffff00739aa04
 #   define OFFSET_KAUTH_CRED_REF                        0xfffffff007374d90
-#   define OFFSET_KAUTH_CRED_UNREF                      0xfffffff007374a70
 #   define OFFSET_IPC_PORT_ALLOC_SPECIAL                0xfffffff0070a60b4 /* convert_task_suspension_token_to_port */
 #   define OFFSET_IPC_KOBJECT_SET                       0xfffffff0070b938c /* convert_task_suspension_token_to_port */
 #   define OFFSET_IPC_PORT_MAKE_SEND                    0xfffffff0070a5bd8 /* "ipc_host_init" */
