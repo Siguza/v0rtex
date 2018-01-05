@@ -2,27 +2,43 @@
 #include <mach/mach.h>
 
 #import "MainController.h"
-#import "v0rtex.h"
 #import "common.h"
+#import "offsets.h"
+#import "v0rtex.h"
+
+kern_return_t cb(task_t tfp0, kptr_t kbase, void *data)
+{
+    FILE *f = fopen("/var/mobile/test.txt", "w");
+    LOG("file: %p", f);
+
+    host_t host = mach_host_self();
+    mach_port_t name = MACH_PORT_NULL;
+    kern_return_t ret = processor_set_default(host, &name);
+    LOG("processor_set_default: %s", mach_error_string(ret));
+    if(ret == KERN_SUCCESS)
+    {
+        mach_port_t priv = MACH_PORT_NULL;
+        ret = host_processor_set_priv(host, name, &priv);
+        LOG("host_processor_set_priv: %s", mach_error_string(ret));
+        if(ret == KERN_SUCCESS)
+        {
+            task_array_t tasks;
+            mach_msg_type_number_t num;
+            ret = processor_set_tasks(priv, &tasks, &num);
+            LOG("processor_set_tasks: %u, %s", num, mach_error_string(ret));
+        }
+    }
+
+    return KERN_SUCCESS;
+}
 
 void* bg(void *arg)
 {
-    kern_return_t ret = v0rtex(NULL, NULL);
-
-    // XXX
-    if(ret == KERN_SUCCESS)
+    offsets_t *off = get_offsets();
+    if(off)
     {
-        /*extern kern_return_t mach_vm_read_overwrite(vm_map_t target_task, mach_vm_address_t address, mach_vm_size_t size, mach_vm_address_t data, mach_vm_size_t *outsize);
-        uint32_t magic = 0;
-        mach_vm_size_t sz = sizeof(magic);
-        ret = mach_vm_read_overwrite(tfp0, 0xfffffff007004000 + kslide, sizeof(magic), (mach_vm_address_t)&magic, &sz);
-        LOG("mach_vm_read_overwrite: %x, %s", magic, mach_error_string(ret));*/
-
-        FILE *f = fopen("/var/mobile/test.txt", "w");
-        LOG("file: %p", f);
+        v0rtex(off, &cb, NULL);
     }
-    // XXX
-
     return NULL;
 }
 

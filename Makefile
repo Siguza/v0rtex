@@ -1,17 +1,16 @@
-TARGET = v0rtex
-PACKAGE = net.siguza.v0rtex
-VERSION = 1.0.0
-
-BIN = bin
-SRC = src
-RES = res
-APP = $(BIN)/Payload/$(TARGET).app
-PNGS := $(wildcard $(RES)/*.png)
-FILES := $(TARGET) Info.plist $(PNGS:$(RES)/%=%)
-IGCC ?= xcrun -sdk iphoneos gcc
-ARCH ?= -arch armv7 -arch arm64
-IGCC_FLAGS ?= -Wall -O3 -fmodules -framework IOKit $(CFLAGS)
-STRIP ?= xcrun -sdk iphoneos strip
+TARGET       = v0rtex
+PACKAGE      = net.siguza.v0rtex
+VERSION      = 1.0.0
+BIN          = bin
+SRC          = src
+RES          = res
+APP          = $(BIN)/Payload/$(TARGET).app
+PNGS        := $(wildcard $(RES)/*.png)
+FILES       := $(TARGET) Info.plist $(PNGS:$(RES)/%=%)
+IGCC        ?= xcrun -sdk iphoneos gcc
+ARCH        ?= -arch armv7 -arch arm64
+IGCC_FLAGS  ?= -Wall -O3 -fmodules -framework IOKit $(CFLAGS)
+STRIP       ?= xcrun -sdk iphoneos strip
 
 .PHONY: all clean
 

@@ -2,7 +2,8 @@
 
 IOSurface exploit.
 
-Gets tfp0, works on A7 through A10 devices on iOS 10.3.3 or lower (offsets not yet included though).
+Gets tfp0, works on all devices on 10.3.3 or lower.  
+Offsets included only for iPod 6G and and iPhone 5/5c on 10.3.3 though.
 
 ### Building
 
