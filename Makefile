@@ -9,7 +9,7 @@ PNGS        := $(wildcard $(RES)/*.png)
 FILES       := $(TARGET) Info.plist $(PNGS:$(RES)/%=%)
 IGCC        ?= xcrun -sdk iphoneos gcc
 ARCH        ?= -arch armv7 -arch arm64
-IGCC_FLAGS  ?= -Wall -O3 -fmodules -framework IOKit $(CFLAGS)
+IGCC_FLAGS  ?= -Wall -O3 -Llib -fmodules -framework IOKit $(CFLAGS)
 STRIP       ?= xcrun -sdk iphoneos strip
 
 .PHONY: all clean
