@@ -251,7 +251,7 @@ I don't know. I suppose this is a good time to start writing my own patchfinder 
 
 Awesome bug, mad props to Ian Beer (and windknown?) for finding it! Also props to both of them for all their previous work, not sure whether we'd all be where we are today without you.
 
-Now, lots of work to be done! If anyone wants to chip in with anything, I'm readily available on Discord (`Siguza#7111`). For updates on this as well as general iOS hacking, you can follow me on ~~Twitter~~ [Mastodon](https://mastodon.social/@siguza)
+Now, lots of work to be done! If anyone wants to chip in with anything, I'm readily available on Discord (`Siguza#7111`). For updates on this as well as general iOS hacking, you can follow me on ~~Twitter~~ [Mastodon](https://mastodon.social/@siguza).
 
 The exploit code can be found [on GitHub](https://github.com/Siguza/v0rtex).
 
